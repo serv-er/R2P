@@ -32,12 +32,6 @@ const shareSchema = new mongoose.Schema(
 const Share = mongoose.model('Share', shareSchema);
 
 
-// ✅ Get __dirname in ES module style
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// --- Serve React frontend build (important for Render) ---
-app.use(express.static(path.join(__dirname, 'client', 'dist')));
 
 // --- Multer setup ---
 const storage = multer.memoryStorage();
@@ -200,6 +194,15 @@ app.get('/api/share/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch shared data.' });
   }
 });
+
+
+// ✅ Get __dirname in ES module style
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// --- Serve React frontend build (important for Render) ---
+app.use(express.static(path.join(__dirname, 'client', 'dist')));
+
 
 
 // ✅ Serve frontend for all other routes
