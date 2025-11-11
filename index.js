@@ -159,7 +159,7 @@ app.post('/api/parse-resume', upload.single('resume'), async (req, res) => {
 });
 
 // ✅ Serve frontend for all other routes
-app.get('*', (req, res) => {
+app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'client', 'dist', 'index.html'));
 });
 
