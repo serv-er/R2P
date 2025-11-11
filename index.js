@@ -1,27 +1,32 @@
 import express from 'express';
-import {GoogleGenAI} from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import multer from 'multer';
-// --- This import now works perfectly because of "type": "module" ---
-import pdfParse from 'pdf-parse-new'
-
+import pdfParse from 'pdf-parse-new';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 // --- SETUP ---
-dotenv.config(); // Load API key from .env file
+dotenv.config();
 const app = express();
 const port = process.env.PORT || 5000;
-app.use(cors()); // Allow requests from your React app
+app.use(cors());
 app.use(express.json());
 
+// ✅ Get __dirname in ES module style
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
+// --- Serve React frontend build (important for Render) ---
+app.use(express.static(path.join(__dirname, 'client', 'dist')));
 
-// Set up Multer for file upload
+// --- Multer setup ---
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-// Initialize Google AI
-const genAI = new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY});
+// --- Initialize Google AI ---
+const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // --- "MAGIC PROMPT" AND SCHEMA ---
 const systemPrompt = `You are a strict, expert resume parsing assistant. Your *only* job is to extract data and format it *exactly* according to the provided JSON schema.
@@ -46,98 +51,93 @@ const systemPrompt = `You are a strict, expert resume parsing assistant. Your *o
     - **education**: Extract all education history into this array.
     - **otherSections**: This is for *everything else* not covered above, such as "Achievements", "Certifications", or "Publications".`;
 
-// --- (UPDATED SCHEMA) ---
 const schema = {
   type: "OBJECT",
   properties: {
-    "basics": {
+    basics: {
       type: "OBJECT",
       properties: {
-        "name": { type: "STRING" },
-        "label": { type: "STRING" },
-        "email": { type: "STRING" },
-        "linkedin": { type: "STRING" },
-        "github": { type: "STRING" },
-        "summary": { type: "STRING" }
+        name: { type: "STRING" },
+        label: { type: "STRING" },
+        email: { type: "STRING" },
+        linkedin: { type: "STRING" },
+        github: { type: "STRING" },
+        summary: { type: "STRING" }
       }
     },
-    "skills": {
+    skills: {
       type: "ARRAY",
-      items: { type: "OBJECT", properties: { "name": { type: "STRING" } } }
+      items: { type: "OBJECT", properties: { name: { type: "STRING" } } }
     },
-    "projects": {
+    projects: {
       type: "ARRAY",
       items: {
         type: "OBJECT",
         properties: {
-          "name": { type: "STRING" },
-          "description": { type: "STRING" },
-          "technologies": { type: "ARRAY", items: { type: "STRING" } },
-          "url": { type: "STRING" }
+          name: { type: "STRING" },
+          description: { type: "STRING" },
+          technologies: { type: "ARRAY", items: { type: "STRING" } },
+          url: { type: "STRING" }
         }
       }
     },
-    "experience": {
+    experience: {
       type: "ARRAY",
       items: {
         type: "OBJECT",
         properties: {
-          "role": { type: "STRING" },
-          "company": { type: "STRING" },
-          "date": { type: "STRING" },
-          "description": { type: "STRING" }
+          role: { type: "STRING" },
+          company: { type: "STRING" },
+          date: { type: "STRING" },
+          description: { type: "STRING" }
         }
       }
     },
-    "education": {
+    education: {
       type: "ARRAY",
       items: {
         type: "OBJECT",
         properties: {
-          "institution": { type: "STRING" },
-          "degree": { type: "STRING" },
-          "date": { type: "STRING" }
+          institution: { type: "STRING" },
+          degree: { type: "STRING" },
+          date: { type: "STRING" }
         }
       }
     },
-   
-
-    "achievements": {
+    achievements: {
       type: "ARRAY",
       items: {
         type: "OBJECT",
         properties: {
-          "description": { type: "STRING" }
+          description: { type: "STRING" }
         }
       }
     },
-    "otherSections": {
+    otherSections: {
       type: "ARRAY",
       items: {
         type: "OBJECT",
         properties: {
-          "title": { type: "STRING" },
-          "content": { type: "STRING" }
+          title: { type: "STRING" },
+          content: { type: "STRING" }
         }
       }
     }
   }
 };
 
-// --- THE API ENDPOINT ---
+// --- API ENDPOINT ---
 app.post('/api/parse-resume', upload.single('resume'), async (req, res) => {
- console.log('Received a file to parse...');
+  console.log('Received a file to parse...');
 
- if (!req.file) {
- return res.status(400).json({ error: 'No resume file uploaded.' });
- }
+  if (!req.file) {
+    return res.status(400).json({ error: 'No resume file uploaded.' });
+  }
 
- try {
- // 1. Read the PDF text from the uploaded file buffer
- const pdfData = await pdfParse(req.file.buffer);
- const resumeText = pdfData.text;
-// console.log(resumeText)
-    // 2. Call the Google AI API (New Stateless Format)
+  try {
+    const pdfData = await pdfParse(req.file.buffer);
+    const resumeText = pdfData.text;
+
     const response = await genAI.models.generateContent({
       model: "gemini-pro-latest",
       systemInstruction: systemPrompt,
@@ -148,22 +148,22 @@ app.post('/api/parse-resume', upload.single('resume'), async (req, res) => {
       },
     });
 
-//  const response = result.response;
- console.log(response)
- console.log(response.text)
- const parsedJson = JSON.parse(response.text);
+    const parsedJson = JSON.parse(response.text);
+    console.log('✅ Successfully parsed resume!');
+    res.json(parsedJson);
 
- console.log('Successfully parsed resume!');
- 
- // 3. Send the clean JSON data back to the React app
- res.json(parsedJson);
-
- } catch (error) {
- console.error('Error in /api/parse-resume:', error);
- res.status(500).json({ error: 'Failed to parse resume.', details: error.message });
- }
+  } catch (error) {
+    console.error('❌ Error in /api/parse-resume:', error);
+    res.status(500).json({ error: 'Failed to parse resume.', details: error.message });
+  }
 });
 
+// ✅ Serve frontend for all other routes
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'client', 'dist', 'index.html'));
+});
+
+// --- Start Server ---
 app.listen(port, () => {
- console.log(`🚀 Server running on https://r2p.onrender.com`);
+  console.log(`🚀 Server running on port ${port}`);
 });
