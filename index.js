@@ -2,6 +2,8 @@ import express from 'express';
 import { GoogleGenAI } from '@google/genai';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
+import { nanoid } from 'nanoid';
 import multer from 'multer';
 import pdfParse from 'pdf-parse-new';
 import path from 'path';
@@ -9,10 +11,26 @@ import { fileURLToPath } from 'url';
 
 // --- SETUP ---
 dotenv.config();
+mongoose
+  .connect(process.env.MONGO_URI, { dbName: 'portfolioDB' })
+  .then(() => console.log('✅ MongoDB connected'))
+  .catch((err) => console.error('❌ MongoDB connection error:', err));
 const app = express();
 const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
+
+const shareSchema = new mongoose.Schema(
+  {
+    shareId: { type: String, unique: true, index: true },
+    data: { type: Object, required: true },
+    createdAt: { type: Date, default: Date.now, expires: 60 * 60 * 24 * 30 }, // auto delete after 30 days
+  },
+  { versionKey: false }
+);
+
+const Share = mongoose.model('Share', shareSchema);
+
 
 // ✅ Get __dirname in ES module style
 const __filename = fileURLToPath(import.meta.url);
@@ -157,6 +175,32 @@ app.post('/api/parse-resume', upload.single('resume'), async (req, res) => {
     res.status(500).json({ error: 'Failed to parse resume.', details: error.message });
   }
 });
+
+// --- API: Create Share Link ---
+app.post('/api/share', async (req, res) => {
+  try {
+    const data = req.body;
+    const shareId = nanoid(8); // short unique ID
+    await Share.create({ shareId, data });
+    res.json({ shareId });
+  } catch (error) {
+    console.error('❌ Error creating share link:', error);
+    res.status(500).json({ error: 'Failed to create share link.' });
+  }
+});
+
+// --- API: Retrieve Shared Data ---
+app.get('/api/share/:id', async (req, res) => {
+  try {
+    const record = await Share.findOne({ shareId: req.params.id });
+    if (!record) return res.status(404).json({ error: 'Share link not found' });
+    res.json(record.data);
+  } catch (error) {
+    console.error('❌ Error fetching share link:', error);
+    res.status(500).json({ error: 'Failed to fetch shared data.' });
+  }
+});
+
 
 // ✅ Serve frontend for all other routes
 app.use((req, res) => {

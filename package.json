@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-     "build": "cd client && npm install && npm run build"
+    "build": "cd client && npm install && npm run build"
   },
   "keywords": [],
   "author": "",
@@ -16,7 +16,9 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "mongoose": "^8.19.3",
     "multer": "^2.0.2",
+    "nanoid": "^5.1.6",
     "pdf-parse-new": "^1.4.1"
   }
 }
