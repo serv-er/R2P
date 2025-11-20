@@ -15,16 +15,23 @@ mongoose
   .connect(process.env.MONGO_URI, { dbName: 'portfolioDB' })
   .then(() => console.log('✅ MongoDB connected'))
   .catch((err) => console.error('❌ MongoDB connection error:', err));
+
 const app = express();
 const port = process.env.PORT || 5000;
-app.use(cors());
-app.use(express.json());
 
+app.use(cors());
+
+// ⭐ FIX 1: Increase body-parser limit (prevents 413 /api/share)
+app.use(express.json({ limit: "15mb" }));
+app.use(express.urlencoded({ extended: true, limit: "15mb" }));
+
+
+// --- Mongo Share Schema ---
 const shareSchema = new mongoose.Schema(
   {
     shareId: { type: String, unique: true, index: true },
     data: { type: Object, required: true },
-    createdAt: { type: Date, default: Date.now, expires: 60 * 60 * 24 * 30 }, // auto delete after 30 days
+    createdAt: { type: Date, default: Date.now, expires: 60 * 60 * 24 * 30 }
   },
   { versionKey: false }
 );
@@ -32,16 +39,21 @@ const shareSchema = new mongoose.Schema(
 const Share = mongoose.model('Share', shareSchema);
 
 
-
-// --- Multer setup ---
+// --- Multer setup (⭐ FIX 2: Limit file size to avoid Render crash) ---
 const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB
+});
+
 
 // --- Initialize Google AI ---
 const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// --- "MAGIC PROMPT" AND SCHEMA ---
-const systemPrompt = `You are a strict, expert resume parsing assistant. Your *only* job is to extract data and format it *exactly* according to the provided JSON schema.
+
+// --- MAGIC PROMPT + SCHEMA EXACTLY AS YOURS ---
+const systemPrompt = `
+You are a strict, expert resume parsing assistant. Your *only* job is to extract data and format it *exactly* according to the provided JSON schema.
 
 - **Important Rules**:
     - Do not invent information. If a field is not found, return an empty string "" for strings or an empty array [] for arrays.
@@ -57,11 +69,12 @@ const systemPrompt = `You are a strict, expert resume parsing assistant. Your *o
         - \`description\`: The bullet points or paragraph *describing* the project.
         - \`technologies\`: The list of technologies used (e.g., "React.js", "Node.js").
         - \`url\`: **ONLY populate this if you see a full, explicit URL** (e.g., "github.com/user/repo"). If you only see link *text* like "Live Demo" or "GitHub", leave this field as an empty string \`""\`.
-  
+
     - **experience**: should be a list of professional work experiences, including role, company, duration, and description.
 - **achievements**:should be a list of awards, certifications, or key achievements.
     - **education**: Extract all education history into this array.
-    - **otherSections**: This is for *everything else* not covered above, such as "Achievements", "Certifications", or "Publications".`;
+    - **otherSections**: This is for *everything else* not covered above, such as "Achievements", "Certifications", or "Publications".
+`;
 
 const schema = {
   type: "OBJECT",
@@ -138,9 +151,10 @@ const schema = {
   }
 };
 
-// --- API ENDPOINT ---
+
+// --- API: Parse Resume ---
 app.post('/api/parse-resume', upload.single('resume'), async (req, res) => {
-  console.log('Received a file to parse...');
+  console.log('📄 File received for parsing...');
 
   if (!req.file) {
     return res.status(400).json({ error: 'No resume file uploaded.' });
@@ -156,26 +170,37 @@ app.post('/api/parse-resume', upload.single('resume'), async (req, res) => {
       contents: [{ role: "user", parts: [{ text: resumeText }] }],
       config: {
         responseMimeType: "application/json",
-        responseSchema: schema,
-      },
+        responseSchema: schema
+      }
     });
 
-    const parsedJson = JSON.parse(response.text);
-    console.log('✅ Successfully parsed resume!');
+    // ⭐ FIX 3: Safe JSON parse (avoids Unexpected token '<')
+    let parsedJson;
+    try {
+      parsedJson = JSON.parse(response.text);
+    } catch (err) {
+      console.error("❌ Gemini returned invalid JSON:", response.text);
+      return res.status(500).json({ error: "AI did not return valid JSON." });
+    }
+
+    console.log('✅ Parsed successfully!');
     res.json(parsedJson);
 
   } catch (error) {
-    console.error('❌ Error in /api/parse-resume:', error);
+    console.error('❌ Error:', error);
     res.status(500).json({ error: 'Failed to parse resume.', details: error.message });
   }
 });
+
 
 // --- API: Create Share Link ---
 app.post('/api/share', async (req, res) => {
   try {
     const data = req.body;
-    const shareId = nanoid(8); // short unique ID
+    const shareId = nanoid(8);
+
     await Share.create({ shareId, data });
+
     res.json({ shareId });
   } catch (error) {
     console.error('❌ Error creating share link:', error);
@@ -183,32 +208,32 @@ app.post('/api/share', async (req, res) => {
   }
 });
 
+
 // --- API: Retrieve Shared Data ---
 app.get('/api/share/:id', async (req, res) => {
   try {
     const record = await Share.findOne({ shareId: req.params.id });
-    if (!record) return res.status(404).json({ error: 'Share link not found' });
+
+    if (!record) return res.status(404).json({ error: "Share link not found" });
+
     res.json(record.data);
   } catch (error) {
-    console.error('❌ Error fetching share link:', error);
+    console.error('❌ Error fetching shared data:', error);
     res.status(500).json({ error: 'Failed to fetch shared data.' });
   }
 });
 
 
-// ✅ Get __dirname in ES module style
+// --- Static Frontend Serve ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// --- Serve React frontend build (important for Render) ---
 app.use(express.static(path.join(__dirname, 'client', 'dist')));
 
-
-
-// ✅ Serve frontend for all other routes
 app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'client', 'dist', 'index.html'));
 });
+
 
 // --- Start Server ---
 app.listen(port, () => {
